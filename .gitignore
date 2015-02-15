@@ -1,0 +1,4 @@
+*.pyc
+chef_hat.egg-info/
+build/
+dist/
