@@ -1,5 +1,5 @@
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 def read(fname):
@@ -7,7 +7,7 @@ def read(fname):
 
 setup(
     name="chef_hat",
-    version="0.0.0",
+    version="0.1.0",
     author="Ben Nuttall",
     author_email="ben@raspberrypi.org",
     description="Sous vide cooking with the Raspberry Pi",
@@ -18,9 +18,7 @@ setup(
         "raspberrypi",
     ],
     url="https://github.com/bennuttall/chef-hat",
-    packages=[
-        "chef_hat",
-    ],
+    packages=find_packages(),
     install_requires=[
         "RPi.GPIO",
         "energenie",
