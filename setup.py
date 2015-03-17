@@ -7,7 +7,7 @@ def read(fname):
 
 setup(
     name="chef_hat",
-    version="0.2.0",
+    version="0.2.1",
     author="Ben Nuttall",
     author_email="ben@raspberrypi.org",
     description="Sous vide cooking with the Raspberry Pi",
