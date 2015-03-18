@@ -12,7 +12,7 @@ GPIO.setwarnings(False)
 class Chef(object):
     """
     Provides an implementation of temperature moderation for use in sous vide
-    cooking with the Chef HAT ass-on for Raspberry Pi. The API allows user
+    cooking with the Chef HAT add-on for Raspberry Pi. The API allows user
     control in Python, but can also be used with a minimal startup script and
     provides control through use of the HAT's buttons and LCD screen.
     """
