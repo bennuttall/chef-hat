@@ -1,6 +1,7 @@
 from RPi import GPIO
 from w1thermsensor import W1ThermSensor
 import energenie
+import lcd
 from datetime import datetime, timedelta
 from time import sleep
 
@@ -57,25 +58,6 @@ class Chef(object):
         if start:
             self.start()
 
-    def start(self):
-        """
-        Progress the object's state to *preparing* and start the cooking
-        process in the loop of temperature moderation and progressive state
-        evolution.
-        """
-
-        self.state = self.STATE_PREPARING
-        self.write("Preparing")
-
-        while self.STATE_PREPARING <= self.state < self.STATE_FINISHED:
-            temperature = self.get_temperature()
-            self.state_machine(temperature)
-            self.moderate_temperature(temperature)
-            sleep(5)
-
-        # State has reached "finished" so run the terminate function to clean up
-        self.terminate(None)
-
     def _setup_gpio(self):
         """
         Setup the GPIO pins used in the Chef HAT (input buttons and status LED)
@@ -91,6 +73,98 @@ class Chef(object):
 
         self.add_button_event(self.BUTTON_BACK, self.terminate)
 
+    def _wait_for_button_press(self, button):
+        """
+        Halts the program until a paticular button is pressed, then continues.
+        """
+
+        GPIO.wait_for_edge(button, self.EDGE)
+
+    def _setup_up_down_buttons(self, increase_function, decrease_function):
+        """
+        Configures the *up* and *down* buttons on the Chef HAT to run
+        particular increase and decrease functions accordingly. When the
+        *enter* button is pressed removes the up/down button events and
+        continues.
+        """
+
+        self.add_button_event(self.BUTTON_UP, increase_function)
+        self.add_button_event(self.BUTTON_DOWN, decrease_function)
+
+        self._wait_for_button_press(self.BUTTON_ENTER)
+
+        self.remove_button_event(self.BUTTON_UP)
+        self.remove_button_event(self.BUTTON_DOWN)
+
+    def _set_target_temperature(self, temperature):
+        """
+        Sets the object's `target_temperature` property. If `temperature` is
+        passed, sets it to the *float* of that value, otherwise sets it to its
+        configured default value and provides the means to change the value
+        using the up/down buttons and the LCD.
+        """
+
+        if temperature is not None:
+            self.target_temperature = float(temperature)
+        else:
+            self.target_temperature = float(self.DEFAULT_TARGET_TEMPERATURE)
+
+            self.display("Set temperature")
+            sleep(1)
+
+            self.display("Temperature: %sC", "%d" % self.target_temperature)
+
+            self._setup_up_down_buttons(
+                self.increase_target_temperature,
+                self.decrease_target_temperature
+            )
+
+        self.target_temperature_margin_lower = self.target_temperature - 1
+        self.target_temperature_margin_upper = self.target_temperature + 1
+
+    def _set_duration(self, duration):
+        """
+        Sets the object's `duration` property. If `duration` is
+        passed, sets it to the *int* of that value, otherwise sets it to its
+        configured default value and provides the means to change the value
+        using the up/down buttons and the LCD.
+        """
+
+        if duration is not None:
+            self.duration = int(duration)
+        else:
+            self.duration = int(self.DEFAULT_DURATION)
+
+            self.display("Set timer")
+            sleep(1)
+
+            self.display("Timer: %s mins", "%d" % self.duration)
+
+            self._setup_up_down_buttons(
+                self.increase_duration,
+                self.decrease_duration
+            )
+
+    def start(self):
+        """
+        Progress the object's state to *preparing* and start the cooking
+        process in the loop of temperature moderation and progressive state
+        evolution.
+        """
+
+        self.state = self.STATE_PREPARING
+        self.display("Preparing")
+
+        while self.STATE_PREPARING <= self.state < self.STATE_FINISHED:
+            temperature = self.get_temperature()
+            self.state_machine(temperature)
+            self.moderate_temperature(temperature)
+            sleep(5)
+
+        # State has reached "finished" so run the terminate function
+        # to clean up
+        self.terminate(None)
+
     def terminate(self, pin):
         """
         Moves the object status to *finished* in order to end the cooking
@@ -100,14 +174,47 @@ class Chef(object):
         self.remove_button_event(self.BUTTON_BACK)
         self.state = self.STATE_FINISHED
 
-    def write(self, text, line=1):
+    def display(self, text, data_1='', data_2=''):
         """
-        Prints `text`
-
-        TODO: writes to the LCD
+        Prints fomatted `text` and `data` and writes an abbreviated version to
+        the LCD.
         """
 
-        print(text)
+        abbreviations = {
+            'Set temperature':
+                ('Set', 'temp'),
+            'Temperature: %sC':
+                ('Temp:', '%7sC' % data_1),
+            'Set timer':
+                ('Set', 'timer'),
+            'Timer: %s mins':
+                ('Timer:', '%3s mins' % data_1),
+            'Temperature: %sC; Timer: %s mins':
+                ('%sC' % data_1, '%s mins' % data_2),
+            'Add food and press enter to continue':
+                ('Add food', 'Press enter'),
+            '%s %s left':
+                ('%s %s' % (data_1, data_2)),
+        }
+
+        # replace the first instance of %s with data_1
+        # and the second with data_2
+        text_with_data = text.replace(
+            '%s', str(data_1), 1
+        ).replace(
+            '%s', str(data_2), 1
+        )
+
+        for line in text_with_data.split('; '):
+            print(text_with_data)
+
+        if text in abbreviations:
+            abbreviation = abbreviations[text]
+            lcd.write(abbreviation[0], line=1)
+            lcd.write(abbreviation[1], line=2)
+        else:
+            lcd.write(text_with_data[:8], line=1)
+            lcd.write(text_with_data[8:16], line=2)
 
     def turn_led_on(self):
         """
@@ -154,88 +261,14 @@ class Chef(object):
 
         GPIO.remove_event_detect(button)
 
-    def _wait_for_button_press(self, button):
-        """
-        Halts the program until a paticular button is pressed, then continues.
-        """
-
-        GPIO.wait_for_edge(button, self.EDGE)
-
-    def _setup_up_down_buttons(self, increase_function, decrease_function):
-        """
-        Configures the *up* and *down* buttons on the Chef HAT to run
-        particular increase and decrease functions accordingly. When the
-        *enter* button is pressed removes the up/down button events and
-        continues.
-        """
-
-        self.add_button_event(self.BUTTON_UP, increase_function)
-        self.add_button_event(self.BUTTON_DOWN, decrease_function)
-
-        self._wait_for_button_press(self.BUTTON_ENTER)
-
-        self.remove_button_event(self.BUTTON_UP)
-        self.remove_button_event(self.BUTTON_DOWN)
-
-    def _set_target_temperature(self, temperature):
-        """
-        Sets the object's `target_temperature` property. If `temperature` is
-        passed, sets it to the *float* of that value, otherwise sets it to its
-        configured default value and provides the means to change the value
-        using the up/down buttons and the LCD.
-        """
-
-        if temperature is not None:
-            self.target_temperature = float(temperature)
-        else:
-            self.target_temperature = float(self.DEFAULT_TARGET_TEMPERATURE)
-
-            self.write("Set")
-            self.write("temp", 2)
-            sleep(1)
-
-            self.write("Temp:")
-            self.write("%7dC" % self.target_temperature, 2)
-
-            self._setup_up_down_buttons(
-                self.increase_target_temperature,
-                self.decrease_target_temperature
-            )
-
-        self.target_temperature_margin_lower = self.target_temperature - 1
-        self.target_temperature_margin_upper = self.target_temperature + 1
-
-    def _set_duration(self, duration):
-        """
-        Sets the object's `duration` property. If `duration` is
-        passed, sets it to the *int* of that value, otherwise sets it to its
-        configured default value and provides the means to change the value
-        using the up/down buttons and the LCD.
-        """
-
-        if duration is not None:
-            self.duration = int(duration)
-        else:
-            self.duration = int(self.DEFAULT_DURATION)
-            self.write("Set")
-            self.write("timer", 2)
-            sleep(1)
-
-            self.write("Timer:")
-            self.write("%2d mins" % self.duration, 2)
-
-            self._setup_up_down_buttons(
-                self.increase_duration,
-                self.decrease_duration
-            )
-
     def display_initial_info(self):
         """
         Displays temperature and duration values as previously configured.
         """
 
-        self.write("%dC" % self.target_temperature)
-        self.write("%d mins" % self.duration, 2)
+        temperature = "%d" % self.target_temperature
+        duration = "%d" % self.duration
+        self.display("Temperature: %sC; Timer: %s mins", temperature, duration)
 
     def increase_target_temperature(self, pin):
         """
@@ -244,8 +277,7 @@ class Chef(object):
         """
 
         self.target_temperature += self.TEMPERATURE_INCREMENT
-        self.write("Temp:")
-        self.write("%7dC" % self.target_temperature, 2)
+        self.display("Temperature: %sC", "%d" % self.target_temperature)
 
     def decrease_target_temperature(self, pin):
         """
@@ -254,8 +286,7 @@ class Chef(object):
         """
 
         self.target_temperature -= self.TEMPERATURE_INCREMENT
-        self.write("Temp:")
-        self.write("%7dC" % self.target_temperature, 2)
+        self.display("Temperature: %sC", "%d" % self.target_temperature)
 
     def increase_duration(self, pin):
         """
@@ -264,8 +295,7 @@ class Chef(object):
         """
 
         self.duration += self.DURATION_INCREMENT
-        self.write("Timer:")
-        self.write("%3d mins" % self.duration, 2)
+        self.display("Timer: %s mins", "%d" % self.duration)
 
     def decrease_duration(self, pin):
         """
@@ -274,8 +304,7 @@ class Chef(object):
         """
 
         self.duration -= self.DURATION_INCREMENT
-        self.write("Timer:")
-        self.write("%3d mins" % self.duration, 2)
+        self.display("Timer: %s mins", "%d" % self.duration)
 
     def update_status_to_ready(self):
         """
@@ -285,7 +314,7 @@ class Chef(object):
 
         self.state = self.STATE_READY
         self.add_button_event(self.BUTTON_ENTER, self.update_status_to_food_in)
-        self.write("Add food and press enter to continue")
+        self.display("Add food and press enter to continue")
 
     def update_status_to_food_in(self, pin):
         """
@@ -295,7 +324,7 @@ class Chef(object):
 
         self.remove_button_event(self.BUTTON_ENTER)
         self.state = self.STATE_FOOD_IN
-        self.write("Food in")
+        self.display("Food in")
 
     def update_status_to_cooking(self):
         """
@@ -304,7 +333,7 @@ class Chef(object):
         """
 
         self.state = self.STATE_COOKING
-        self.write("Cooking")
+        self.display("Cooking")
         current_time = datetime.now()
         print(current_time)
         self.end_time = current_time + timedelta(minutes=self.duration)
@@ -317,8 +346,11 @@ class Chef(object):
         """
 
         self.state = self.STATE_COOKED
-        self.write("Cooked")
-        self.add_button_event(self.BUTTON_ENTER, self.update_status_to_finished)
+        self.display("Cooked")
+        self.add_button_event(
+            self.BUTTON_ENTER,
+            self.update_status_to_finished
+        )
 
     def update_status_to_finished(self, pin):
         """
@@ -326,7 +358,7 @@ class Chef(object):
         """
 
         self.state = self.STATE_FINISHED
-        self.write("Finished")
+        self.display("Finished")
 
     def get_temperature(self):
         """
@@ -345,10 +377,10 @@ class Chef(object):
 
         if temperature < self.target_temperature:
             self.turn_cooker_on()
-            self.write("%.2f on" % temperature)
+            self.display("%.2f on" % temperature) ###
         else:
             self.turn_cooker_off()
-            self.write("%.2f off" % temperature)
+            self.display("%.2f off" % temperature)
 
     def state_machine(self, temperature):
         """
@@ -386,14 +418,15 @@ class Chef(object):
 
         current_time = datetime.now()
         time_left = self.end_time - current_time
-        seconds_left = time_left.seconds
-        minutes_left = seconds_left // 60
-        if minutes_left > 0:
-            min_or_mins = 'min' if minutes_left == 1 else 'mins'
-            print("%s %s left" % (minutes_left, min_or_mins))
+        secs_left = time_left.seconds
+        mins_left = secs_left // 60
+
+        if mins_left > 0:
+            min_or_mins = 'min' if mins_left == 1 else 'mins'
+            self.display("%s %s left", "%3d" % (mins_left, min_or_mins), line=2)
         else:
-            sec or secs = 'sec' if seconds_left == 1 else 'secs'
-            print("%s %s left" % (seconds_left, sec or secs))
+            sec_or_secs = 'sec' if secs_left == 1 else 'secs'
+            self.display("%s %s left", "%3d" % (secs_left, sec_or_secs), line=2)
 
     def in_temperature_range(self, temperature):
         """
