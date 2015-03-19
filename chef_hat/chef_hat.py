@@ -33,7 +33,7 @@ class Chef(object):
     BUTTON_BACK = 10
     BUTTONS = [BUTTON_UP, BUTTON_DOWN, BUTTON_ENTER, BUTTON_BACK]
 
-    BOUNCETIME = 1000
+    BOUNCETIME = 100
     PULL = GPIO.PUD_UP
     EDGE = GPIO.FALLING
 
@@ -226,10 +226,6 @@ class Chef(object):
             "Temperature: %sC - cooker on; Finished cooking": (
                 '%s  on' % data_1,
                 'Cooked'
-            ),
-            "Food in": (
-                "Food",
-                "in"
             )
         }
 
@@ -245,20 +241,13 @@ class Chef(object):
         for line in text_with_data.split('; '):
             print(line)
 
-        '''print(text in abbreviations)
-
         if text in abbreviations:
-            print("in")
             abbreviation = abbreviations[text]
             lcd.write(abbreviation[0], line=1)
             lcd.write(abbreviation[1], line=2)
-            print("success in")
         else:
-            print("else")
             lcd.write(text_with_data[:8], line=1)
-            print("success 1")
             lcd.write(text_with_data[8:16], line=2)
-            print("success 2")'''
 
     def turn_led_on(self):
         """
@@ -371,7 +360,6 @@ class Chef(object):
         self.remove_button_event(self.BUTTON_ENTER)
         self.state = self.STATE_FOOD_IN
         self.display("Food in")
-        print("displayed food in")
 
     def update_status_to_cooking(self):
         """
@@ -410,7 +398,6 @@ class Chef(object):
         Returns the current temperature from the temperature sensor as a float.
         """
 
-        print(self.sensor.get_temperature())
         return self.sensor.get_temperature()
 
     def moderate_temperature(self, temperature):
@@ -529,7 +516,6 @@ class Chef(object):
 if __name__ == '__main__':
     while True:
         chef = Chef(temperature=26, duration=5)
-        print("restarting")
         """
         It seems silly to keep reinstantiating the object in a while loop but
         it just throws the object away and lets the user start again
