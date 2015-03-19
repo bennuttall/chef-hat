@@ -33,7 +33,7 @@ class Chef(object):
     BUTTON_BACK = 10
     BUTTONS = [BUTTON_UP, BUTTON_DOWN, BUTTON_ENTER, BUTTON_BACK]
 
-    BOUNCETIME = 100
+    BOUNCETIME = 1000
     PULL = GPIO.PUD_UP
     EDGE = GPIO.FALLING
 
@@ -51,6 +51,7 @@ class Chef(object):
         self.end_time = None
 
         self._setup_gpio()
+        self.turn_cooker_off()
         self._set_target_temperature(temperature)
         self._set_duration(duration)
         self.display_initial_info()
@@ -157,8 +158,9 @@ class Chef(object):
 
         while self.STATE_PREPARING <= self.state < self.STATE_FINISHED:
             temperature = self.get_temperature()
-            self.state_machine(temperature)
             self.moderate_temperature(temperature)
+            self.state_machine(temperature)
+            self.display_info(temperature)
             sleep(5)
 
         # State has reached "finished" so run the terminate function
@@ -176,25 +178,59 @@ class Chef(object):
 
     def display(self, text, data_1='', data_2=''):
         """
-        Prints fomatted `text` and `data` and writes an abbreviated version to
-        the LCD.
+        Prints fomatted `text` and data values and writes an abbreviated
+        version to the LCD.
         """
 
         abbreviations = {
-            'Set temperature':
-                ('Set', 'temp'),
-            'Temperature: %sC':
-                ('Temp:', '%7sC' % data_1),
-            'Set timer':
-                ('Set', 'timer'),
-            'Timer: %s mins':
-                ('Timer:', '%3s mins' % data_1),
-            'Temperature: %sC; Timer: %s mins':
-                ('%sC' % data_1, '%s mins' % data_2),
-            'Add food and press enter to continue':
-                ('Add food', 'Press enter'),
-            '%s %s left':
-                ('%s %s' % (data_1, data_2)),
+            "Set temperature": (
+                'Set',
+                'temp'
+            ),
+            "Temperature: %sC": (
+                'Temp:',
+                '%7sC' % data_1
+            ),
+            "Set timer": (
+                'Set',
+                'timer'
+            ),
+            "Timer: %s mins": (
+                'Timer:',
+                '%3s mins' % data_1
+            ),
+            "Temperature: %sC; Timer: %s mins": (
+                '%sC' % data_1,
+                '%s mins' % data_2
+            ),
+            "Add food and press enter to continue": (
+                'Add food',
+                '+ Enter'
+            ),
+            "Temperature: %sC - cooker on": (
+                '%sC' % data_1,
+                'on'
+            ),
+            "Temperature: %sC - cooker off": (
+                '%sC' % data_1,
+                'off'
+            ),
+            "Temperature: %sC - cooker on; %s left": (
+                '%s  on' % data_1,
+                '%s left' % data_2
+            ),
+            "Temperature: %sC - cooker off; %s left": (
+                '%s off' % data_1,
+                '%s left' % data_2
+            ),
+            "Temperature: %sC - cooker on; Finished cooking": (
+                '%s  on' % data_1,
+                'Cooked'
+            ),
+            "Food in": (
+                "Food",
+                "in"
+            )
         }
 
         # replace the first instance of %s with data_1
@@ -205,16 +241,24 @@ class Chef(object):
             '%s', str(data_2), 1
         )
 
+        print()
         for line in text_with_data.split('; '):
-            print(text_with_data)
+            print(line)
+
+        '''print(text in abbreviations)
 
         if text in abbreviations:
+            print("in")
             abbreviation = abbreviations[text]
             lcd.write(abbreviation[0], line=1)
             lcd.write(abbreviation[1], line=2)
+            print("success in")
         else:
+            print("else")
             lcd.write(text_with_data[:8], line=1)
+            print("success 1")
             lcd.write(text_with_data[8:16], line=2)
+            print("success 2")'''
 
     def turn_led_on(self):
         """
@@ -235,6 +279,7 @@ class Chef(object):
         Uses energenie to switch the cooker on. Also turns on the status LED.
         """
 
+        self.cooker_on = True
         energenie.switch_on()
         self.turn_led_on()
 
@@ -243,6 +288,7 @@ class Chef(object):
         Uses energenie to switch the cooker off. Also turns off the status LED.
         """
 
+        self.cooker_on = False
         energenie.switch_off()
         self.turn_led_off()
 
@@ -325,6 +371,7 @@ class Chef(object):
         self.remove_button_event(self.BUTTON_ENTER)
         self.state = self.STATE_FOOD_IN
         self.display("Food in")
+        print("displayed food in")
 
     def update_status_to_cooking(self):
         """
@@ -335,9 +382,7 @@ class Chef(object):
         self.state = self.STATE_COOKING
         self.display("Cooking")
         current_time = datetime.now()
-        print(current_time)
         self.end_time = current_time + timedelta(minutes=self.duration)
-        print(self.end_time)
 
     def update_status_to_cooked(self):
         """
@@ -365,6 +410,7 @@ class Chef(object):
         Returns the current temperature from the temperature sensor as a float.
         """
 
+        print(self.sensor.get_temperature())
         return self.sensor.get_temperature()
 
     def moderate_temperature(self, temperature):
@@ -377,10 +423,8 @@ class Chef(object):
 
         if temperature < self.target_temperature:
             self.turn_cooker_on()
-            self.display("%.2f on" % temperature) ###
         else:
             self.turn_cooker_off()
-            self.display("%.2f off" % temperature)
 
     def state_machine(self, temperature):
         """
@@ -393,7 +437,6 @@ class Chef(object):
             temperature in range of target => update status to *cooking*
 
         State: Cooking
-            time remaining => show remaining time
             time out => update status to *cooked*
         """
 
@@ -405,28 +448,71 @@ class Chef(object):
                 self.update_status_to_cooking()
         elif self.state == self.STATE_COOKING:
             current_time = datetime.now()
-            if self.end_time > current_time:
-                self.show_remaining_time()
-            else:
+            if current_time > self.end_time:
                 self.update_status_to_cooked()
 
-    def show_remaining_time(self):
+    def display_info(self, temperature=None):
         """
-        Prints the amount of cooking time remaining. If under 1 minute, shown
-        in seconds, otherwise shown in minutes.
+        Displays information according to the object's state.
+        """
+
+        if self.state in [self.STATE_PREPARING, self.STATE_FOOD_IN]:
+            if self.cooker_on:
+                self.display(
+                    "Temperature: %sC - cooker on", "%.1f" % temperature
+                )
+            else:
+                self.display(
+                    "Temperature: %sC - cooker off", "%.1f" % temperature
+                )
+        elif self.state == self.STATE_COOKING:
+            time_left = self.get_remaining_time()
+            if self.cooker_on:
+                self.display(
+                    "Temperature: %sC - cooker on; %s left",
+                    "%.1f" % temperature,
+                    "%s" % time_left
+                )
+            else:
+                self.display(
+                    "Temperature: %sC - cooker off; %s left",
+                    "%.1f" % temperature,
+                    "%s" % time_left
+                )
+        elif self.state == self.STATE_COOKED:
+            time_left = self.get_remaining_time()
+            if self.cooker_on:
+                self.display(
+                    "Temperature: %sC - cooker on; Finished cooking",
+                    "%.1f" % temperature
+                )
+            else:
+                self.display(
+                    "Temperature: %sC - cooker off; Finished cooking",
+                    "%.1f" % temperature
+                )
+
+
+    def get_remaining_time(self):
+        """
+        Returns the amount of cooking time remaining. If under 1 minute, given
+        in seconds, otherwise given in minutes.
         """
 
         current_time = datetime.now()
         time_left = self.end_time - current_time
-        secs_left = time_left.seconds
-        mins_left = secs_left // 60
+        seconds_left = time_left.seconds
+        minutes_left = seconds_left // 60
 
-        if mins_left > 0:
-            min_or_mins = 'min' if mins_left == 1 else 'mins'
-            self.display("%s %s left", "%3d" % (mins_left, min_or_mins), line=2)
+        if minutes_left > 0:
+            if minutes_left == 1:
+                return "1 minute left"
+            else:
+                return "%s minutes left" % minutes_left
+        elif seconds_left == 1:
+            return "1 second left"
         else:
-            sec_or_secs = 'sec' if secs_left == 1 else 'secs'
-            self.display("%s %s left", "%3d" % (secs_left, sec_or_secs), line=2)
+            return "%s seconds left" % seconds_left
 
     def in_temperature_range(self, temperature):
         """
@@ -442,7 +528,8 @@ class Chef(object):
 
 if __name__ == '__main__':
     while True:
-        chef = Chef()
+        chef = Chef(temperature=26, duration=5)
+        print("restarting")
         """
         It seems silly to keep reinstantiating the object in a while loop but
         it just throws the object away and lets the user start again
